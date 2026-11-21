@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Organisation, User
-from app.schemas.auth import InscriptionCreate, UserRead
-from app.security import hasher_mot_de_passe
+from app.schemas.auth import InscriptionCreate, Token, UserRead
+from app.security import creer_token, hasher_mot_de_passe, verifier_mot_de_passe
 
 router = APIRouter(prefix="/auth", tags=["Authentification"])
 
@@ -28,3 +29,22 @@ def inscription(data: InscriptionCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
     return user
+
+
+@router.post("/login", response_model=Token)
+def connexion(
+    form: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
+    user = db.scalars(select(User).where(User.email == form.username)).first()
+
+    if user is None or not verifier_mot_de_passe(
+        form.password, user.mot_de_passe_hache
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Email ou mot de passe incorrect",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return Token(access_token=creer_token(user.id), token_type="bearer")
