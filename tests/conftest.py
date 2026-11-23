@@ -44,3 +44,28 @@ def client(db):
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def make_headers(client):
+    def _make(
+        email="alice@atelier-dupont.fr",
+        mot_de_passe="motdepasse123",
+        nom_organisation="Atelier Dupont",
+    ):
+        client.post(
+            "/auth/register",
+            json={
+                "nom_organisation": nom_organisation,
+                "email": email,
+                "nom": "Testeur",
+                "mot_de_passe": mot_de_passe,
+            },
+        )
+        r = client.post(
+            "/auth/login",
+            data={"username": email, "password": mot_de_passe},
+        )
+        return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+    return _make
