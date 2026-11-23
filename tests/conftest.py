@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app import models  # noqa: F401
+from app import models
 from app.config import settings
 from app.database import Base, get_db
 from app.main import app
