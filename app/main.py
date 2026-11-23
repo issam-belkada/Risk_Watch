@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.routers import auth
+from app.routers import auth, users
 
 app = FastAPI(title="RiskWatch", version="0.1.0")
 

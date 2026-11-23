@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.deps import get_current_user
 from app.models import Organisation, User
 from app.schemas.auth import InscriptionCreate, Token, UserRead
 from app.security import creer_token, hasher_mot_de_passe, verifier_mot_de_passe
@@ -48,3 +49,8 @@ def connexion(
         )
 
     return Token(access_token=creer_token(user.id), token_type="bearer")
+
+
+@router.get("/me", response_model=UserRead)
+def moi(current_user: User = Depends(get_current_user)):
+    return current_user
