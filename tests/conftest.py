@@ -69,3 +69,15 @@ def make_headers(client):
         return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
     return _make
+
+
+@pytest.fixture
+def se_connecter(client):
+    def _login(email, mot_de_passe="motdepasse123"):
+        r = client.post(
+            "/auth/login",
+            data={"username": email, "password": mot_de_passe},
+        )
+        return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+    return _login

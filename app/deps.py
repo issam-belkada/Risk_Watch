@@ -1,4 +1,5 @@
 import jwt
+from dataclasses import dataclass
 from fastapi import Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
