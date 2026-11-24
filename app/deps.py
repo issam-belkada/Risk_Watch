@@ -1,5 +1,5 @@
 import jwt
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
@@ -45,3 +45,16 @@ def exiger_role(*roles: str):
         return user
 
     return verifier
+
+
+@dataclass
+class Pagination:
+    limite: int
+    decalage: int
+
+
+def get_pagination(
+    limite: int = Query(10, ge=1, le=100),
+    decalage: int = Query(0, ge=0),
+) -> Pagination:
+    return Pagination(limite=limite, decalage=decalage)
