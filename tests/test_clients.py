@@ -148,3 +148,87 @@ def test_lire_client_d_une_autre_organisation(client, make_headers):
     cid = client.post("/clients", json=CLIENT, headers=headers_a).json()["id"]
 
     assert client.get(f"/clients/{cid}", headers=headers_b).status_code == 404
+
+
+def test_modifier_client_partiellement(client, make_headers):
+    headers = make_headers()
+    cid = client.post("/clients", json=CLIENT, headers=headers).json()["id"]
+
+    r = client.patch(f"/clients/{cid}", json={"delai_paiement_jours": 60}, headers=headers)
+
+    assert r.status_code == 200
+    assert r.json()["delai_paiement_jours"] == 60
+    assert r.json()["raison_sociale"] == "Hôtel du Parc"
+    assert r.json()["siren"] == "732829320"
+
+
+def test_modifier_client_siren_invalide(client, make_headers):
+    headers = make_headers()
+    cid = client.post("/clients", json=CLIENT, headers=headers).json()["id"]
+
+    r = client.patch(f"/clients/{cid}", json={"siren": "123456789"}, headers=headers)
+
+    assert r.status_code == 422
+
+
+def test_modifier_client_valeur_null_interdite(client, make_headers):
+    headers = make_headers()
+    cid = client.post("/clients", json=CLIENT, headers=headers).json()["id"]
+
+    r = client.patch(f"/clients/{cid}", json={"raison_sociale": None}, headers=headers)
+
+    assert r.status_code == 422
+
+
+def test_modifier_client_retirer_le_siren(client, make_headers):
+    headers = make_headers()
+    cid = client.post("/clients", json=CLIENT, headers=headers).json()["id"]
+
+    r = client.patch(f"/clients/{cid}", json={"siren": None}, headers=headers)
+
+    assert r.status_code == 200
+    assert r.json()["siren"] is None
+
+
+def test_modifier_client_siren_deja_utilise(client, make_headers):
+    headers = make_headers()
+    client.post("/clients", json=CLIENT, headers=headers)
+    autre = client.post(
+        "/clients", json={**SANS_SIREN, "raison_sociale": "Beta"}, headers=headers
+    ).json()["id"]
+
+    r = client.patch(f"/clients/{autre}", json={"siren": "732829320"}, headers=headers)
+
+    assert r.status_code == 409
+
+
+def test_modifier_client_d_une_autre_organisation(client, make_headers):
+    headers_a = make_headers("alice@atelier-dupont.fr", nom_organisation="Atelier Dupont")
+    headers_b = make_headers("bruno@autre-entreprise.fr", nom_organisation="Autre Entreprise")
+    cid = client.post("/clients", json=CLIENT, headers=headers_a).json()["id"]
+
+    r = client.patch(f"/clients/{cid}", json={"delai_paiement_jours": 90}, headers=headers_b)
+
+    assert r.status_code == 404
+    lu = client.get(f"/clients/{cid}", headers=headers_a).json()
+    assert lu["delai_paiement_jours"] == 45
+
+
+def test_lecteur_ne_peut_pas_modifier_un_client(client, make_headers, se_connecter):
+    headers_admin = make_headers()
+    client.post(
+        "/users",
+        json={
+            "email": "lea@atelier-dupont.fr",
+            "nom": "Léa",
+            "mot_de_passe": "motdepasse123",
+            "role": "lecteur",
+        },
+        headers=headers_admin,
+    )
+    cid = client.post("/clients", json=CLIENT, headers=headers_admin).json()["id"]
+    headers_lecteur = se_connecter("lea@atelier-dupont.fr")
+
+    r = client.patch(f"/clients/{cid}", json={"delai_paiement_jours": 90}, headers=headers_lecteur)
+
+    assert r.status_code == 403
