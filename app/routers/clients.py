@@ -5,9 +5,19 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.deps import Pagination, exiger_role, get_current_user, get_pagination
 from app.models import Client, User
-from app.schemas.clients import ClientCreate, ClientRead
+from app.schemas.clients import ClientCreate, ClientRead, ClientUpdate
 
 router = APIRouter(prefix="/clients", tags=["Clients"])
+
+def get_client_de_l_organisation(
+    client_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Client:
+    client = db.get(Client, client_id)
+    if client is None or client.organisation_id != user.organisation_id:
+        raise HTTPException(status_code=404, detail="Client introuvable")
+    return client
 
 
 @router.post("", response_model=ClientRead, status_code=201)
@@ -57,3 +67,42 @@ def lister_clients(
         .offset(pagination.decalage)
     )
     return db.scalars(requete).all()
+
+
+@router.get("/{client_id}", response_model=ClientRead)
+def lire_client(client: Client = Depends(get_client_de_l_organisation)):
+    return client
+
+
+@router.patch(
+    "/{client_id}",
+    response_model=ClientRead,
+    dependencies=[Depends(exiger_role("analyste", "admin"))],
+)
+def modifier_client(
+    data: ClientUpdate,
+    client: Client = Depends(get_client_de_l_organisation),
+    db: Session = Depends(get_db),
+):
+    changements = data.model_dump(exclude_unset=True)
+
+    nouveau_siren = changements.get("siren")
+    if nouveau_siren:
+        doublon = db.scalars(
+            select(Client).where(
+                Client.organisation_id == client.organisation_id,
+                Client.siren == nouveau_siren,
+                Client.id != client.id,
+            )
+        ).first()
+        if doublon:
+            raise HTTPException(
+                status_code=409, detail="Un client avec ce SIREN existe déjà"
+            )
+
+    for champ, valeur in changements.items():
+        setattr(client, champ, valeur)
+
+    db.commit()
+    db.refresh(client)
+    return client

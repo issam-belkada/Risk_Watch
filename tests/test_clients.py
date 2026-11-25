@@ -118,3 +118,33 @@ def test_isolation_des_clients(client, make_headers):
     r = client.post("/clients", json=CLIENT, headers=headers_b)
     assert r.status_code == 201
     assert len(client.get("/clients", headers=headers_a).json()) == 1
+
+
+def test_lire_client(client, make_headers):
+    headers = make_headers()
+    cid = client.post("/clients", json=CLIENT, headers=headers).json()["id"]
+
+    r = client.get(f"/clients/{cid}", headers=headers)
+
+    assert r.status_code == 200
+    assert r.json()["raison_sociale"] == "Hôtel du Parc"
+
+
+def test_lire_client_inexistant(client, make_headers):
+    headers = make_headers()
+
+    assert client.get("/clients/9999", headers=headers).status_code == 404
+
+
+def test_lire_client_id_invalide(client, make_headers):
+    headers = make_headers()
+
+    assert client.get("/clients/abc", headers=headers).status_code == 422
+
+
+def test_lire_client_d_une_autre_organisation(client, make_headers):
+    headers_a = make_headers("alice@atelier-dupont.fr", nom_organisation="Atelier Dupont")
+    headers_b = make_headers("bruno@autre-entreprise.fr", nom_organisation="Autre Entreprise")
+    cid = client.post("/clients", json=CLIENT, headers=headers_a).json()["id"]
+
+    assert client.get(f"/clients/{cid}", headers=headers_b).status_code == 404
