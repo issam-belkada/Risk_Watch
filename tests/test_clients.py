@@ -232,3 +232,52 @@ def test_lecteur_ne_peut_pas_modifier_un_client(client, make_headers, se_connect
     r = client.patch(f"/clients/{cid}", json={"delai_paiement_jours": 90}, headers=headers_lecteur)
 
     assert r.status_code == 403
+
+
+def test_supprimer_client(client, make_headers):
+    headers = make_headers()
+    cid = client.post("/clients", json=CLIENT, headers=headers).json()["id"]
+
+    r = client.delete(f"/clients/{cid}", headers=headers)
+
+    assert r.status_code == 204
+    assert client.get(f"/clients/{cid}", headers=headers).status_code == 404
+    assert client.get("/clients", headers=headers).json() == []
+
+
+def test_supprimer_client_inexistant(client, make_headers):
+    headers = make_headers()
+
+    assert client.delete("/clients/9999", headers=headers).status_code == 404
+
+
+def test_analyste_ne_peut_pas_supprimer_un_client(client, make_headers, se_connecter):
+    headers_admin = make_headers()
+    client.post(
+        "/users",
+        json={
+            "email": "bob@atelier-dupont.fr",
+            "nom": "Bob",
+            "mot_de_passe": "motdepasse123",
+            "role": "analyste",
+        },
+        headers=headers_admin,
+    )
+    cid = client.post("/clients", json=CLIENT, headers=headers_admin).json()["id"]
+    headers_bob = se_connecter("bob@atelier-dupont.fr")
+
+    r = client.delete(f"/clients/{cid}", headers=headers_bob)
+
+    assert r.status_code == 403
+    assert client.get(f"/clients/{cid}", headers=headers_admin).status_code == 200
+
+
+def test_supprimer_client_d_une_autre_organisation(client, make_headers):
+    headers_a = make_headers("alice@atelier-dupont.fr", nom_organisation="Atelier Dupont")
+    headers_b = make_headers("bruno@autre-entreprise.fr", nom_organisation="Autre Entreprise")
+    cid = client.post("/clients", json=CLIENT, headers=headers_a).json()["id"]
+
+    r = client.delete(f"/clients/{cid}", headers=headers_b)
+
+    assert r.status_code == 404
+    assert client.get(f"/clients/{cid}", headers=headers_a).status_code == 200

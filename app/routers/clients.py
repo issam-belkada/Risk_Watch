@@ -106,3 +106,16 @@ def modifier_client(
     db.commit()
     db.refresh(client)
     return client
+
+
+@router.delete(
+    "/{client_id}",
+    status_code=204,
+    dependencies=[Depends(exiger_role("admin"))],
+)
+def supprimer_client(
+    client: Client = Depends(get_client_de_l_organisation),
+    db: Session = Depends(get_db),
+):
+    db.delete(client)
+    db.commit()
