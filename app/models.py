@@ -1,6 +1,7 @@
 from datetime import date
+from decimal import Decimal
 
-from sqlalchemy import ForeignKey, String, UniqueConstraint
+from sqlalchemy import CheckConstraint, ForeignKey, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -51,3 +52,30 @@ class Client(Base):
     delai_paiement_jours: Mapped[int] = mapped_column(default=30)
 
     organisation: Mapped["Organisation"] = relationship(back_populates="clients")
+    factures: Mapped[list["Facture"]] = relationship(
+        back_populates="client", cascade="all, delete-orphan"
+    )
+
+
+class Facture(Base):
+    __tablename__ = "factures"
+    __table_args__ = (
+        UniqueConstraint("client_id", "numero"),
+        CheckConstraint("montant_ttc > 0", name="ck_factures_montant_positif"),
+        CheckConstraint(
+            "date_echeance >= date_emission",
+            name="ck_factures_echeance_apres_emission",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    client_id: Mapped[int] = mapped_column(
+        ForeignKey("clients.id", ondelete="CASCADE"), index=True
+    )
+    numero: Mapped[str] = mapped_column(String(50))
+    montant_ttc: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    date_emission: Mapped[date]
+    date_echeance: Mapped[date]
+    date_paiement: Mapped[date | None]
+
+    client: Mapped["Client"] = relationship(back_populates="factures")
