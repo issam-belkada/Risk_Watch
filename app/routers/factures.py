@@ -10,6 +10,7 @@ from app.models import Client, Facture, User
 from app.schemas.factures import (
     FactureCreate,
     FactureRead,
+    FactureUpdate,
     PaiementCreate,
     StatutFacture,
 )
@@ -126,3 +127,68 @@ def enregistrer_paiement(
     db.commit()
     db.refresh(facture)
     return facture
+
+
+@router.patch(
+    "/{facture_id}",
+    response_model=FactureRead,
+    dependencies=[Depends(exiger_role("analyste", "admin"))],
+)
+def modifier_facture(
+    data: FactureUpdate,
+    facture: Facture = Depends(get_facture_de_l_organisation),
+    db: Session = Depends(get_db),
+):
+    if facture.date_paiement is not None:
+        raise HTTPException(
+            status_code=409, detail="Une facture payée ne peut plus être modifiée"
+        )
+
+    changements = data.model_dump(exclude_unset=True)
+
+    emission = changements.get("date_emission", facture.date_emission)
+    echeance = changements.get("date_echeance", facture.date_echeance)
+    if echeance < emission:
+        raise HTTPException(
+            status_code=422,
+            detail="L'échéance ne peut pas précéder la date d'émission",
+        )
+
+    nouveau_numero = changements.get("numero")
+    if nouveau_numero and nouveau_numero != facture.numero:
+        doublon = db.scalars(
+            select(Facture).where(
+                Facture.client_id == facture.client_id,
+                Facture.numero == nouveau_numero,
+                Facture.id != facture.id,
+            )
+        ).first()
+        if doublon:
+            raise HTTPException(
+                status_code=409,
+                detail="Ce numéro de facture existe déjà pour ce client",
+            )
+
+    for champ, valeur in changements.items():
+        setattr(facture, champ, valeur)
+
+    db.commit()
+    db.refresh(facture)
+    return facture
+
+
+@router.delete(
+    "/{facture_id}",
+    status_code=204,
+    dependencies=[Depends(exiger_role("admin"))],
+)
+def supprimer_facture(
+    facture: Facture = Depends(get_facture_de_l_organisation),
+    db: Session = Depends(get_db),
+):
+    if facture.date_paiement is not None:
+        raise HTTPException(
+            status_code=409, detail="Une facture payée ne peut pas être supprimée"
+        )
+    db.delete(facture)
+    db.commit()
