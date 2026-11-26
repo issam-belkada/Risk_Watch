@@ -267,3 +267,134 @@ def test_paiement_facture_d_une_autre_organisation(client, make_headers):
 
     assert r.status_code == 404
     assert client.get(f"/factures/{fid}", headers=headers_a).json()["statut"] == "en_retard"
+
+
+def test_modifier_facture_montant(client, headers, client_id):
+    fid = client.post("/factures", json=facture(client_id), headers=headers).json()["id"]
+
+    r = client.patch(f"/factures/{fid}", json={"montant_ttc": "2000.00"}, headers=headers)
+
+    assert r.status_code == 200
+    assert r.json()["montant_ttc"] == "2000.00"
+    assert r.json()["numero"] == "F-001"
+
+
+def test_modifier_facture_echeance_avant_emission(client, headers, client_id):
+    f = client.post("/factures", json=facture(client_id), headers=headers).json()
+    avant = (date.fromisoformat(f["date_emission"]) - timedelta(days=1)).isoformat()
+
+    r = client.patch(f"/factures/{f['id']}", json={"date_echeance": avant}, headers=headers)
+
+    assert r.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "changement",
+    [{"montant_ttc": "-1"}, {"montant_ttc": None}, {"numero": ""}],
+)
+def test_modifier_facture_valeur_invalide(client, headers, client_id, changement):
+    fid = client.post("/factures", json=facture(client_id), headers=headers).json()["id"]
+
+    r = client.patch(f"/factures/{fid}", json=changement, headers=headers)
+
+    assert r.status_code == 422
+
+
+def test_modifier_facture_numero_deja_utilise(client, headers, client_id):
+    client.post("/factures", json=facture(client_id, "F-001"), headers=headers)
+    fid = client.post("/factures", json=facture(client_id, "F-002"), headers=headers).json()["id"]
+
+    r = client.patch(f"/factures/{fid}", json={"numero": "F-001"}, headers=headers)
+
+    assert r.status_code == 409
+
+
+def test_modifier_facture_garde_son_propre_numero(client, headers, client_id):
+    fid = client.post("/factures", json=facture(client_id, "F-001"), headers=headers).json()["id"]
+
+    r = client.patch(
+        f"/factures/{fid}", json={"numero": "F-001", "montant_ttc": "10.00"}, headers=headers
+    )
+
+    assert r.status_code == 200
+
+
+def test_facture_payee_non_modifiable(client, headers, client_id):
+    fid = client.post("/factures", json=facture(client_id), headers=headers).json()["id"]
+    client.post(f"/factures/{fid}/paiement", json={"date_paiement": jours(5)}, headers=headers)
+
+    r = client.patch(f"/factures/{fid}", json={"montant_ttc": "1.00"}, headers=headers)
+
+    assert r.status_code == 409
+    assert client.get(f"/factures/{fid}", headers=headers).json()["montant_ttc"] == "1200.50"
+
+
+def test_modifier_facture_d_une_autre_organisation(client, make_headers):
+    headers_a = make_headers("alice@atelier-dupont.fr", nom_organisation="Atelier Dupont")
+    headers_b = make_headers("bruno@autre-entreprise.fr", nom_organisation="Autre Entreprise")
+    cid = client.post("/clients", json=CLIENT, headers=headers_a).json()["id"]
+    fid = client.post("/factures", json=facture(cid), headers=headers_a).json()["id"]
+
+    r = client.patch(f"/factures/{fid}", json={"montant_ttc": "1.00"}, headers=headers_b)
+
+    assert r.status_code == 404
+    assert client.get(f"/factures/{fid}", headers=headers_a).json()["montant_ttc"] == "1200.50"
+
+
+def test_supprimer_facture(client, headers, client_id):
+    fid = client.post("/factures", json=facture(client_id), headers=headers).json()["id"]
+
+    r = client.delete(f"/factures/{fid}", headers=headers)
+
+    assert r.status_code == 204
+    assert client.get(f"/factures/{fid}", headers=headers).status_code == 404
+
+
+def test_facture_payee_non_supprimable(client, headers, client_id):
+    fid = client.post("/factures", json=facture(client_id), headers=headers).json()["id"]
+    client.post(f"/factures/{fid}/paiement", json={"date_paiement": jours(5)}, headers=headers)
+
+    r = client.delete(f"/factures/{fid}", headers=headers)
+
+    assert r.status_code == 409
+    assert client.get(f"/factures/{fid}", headers=headers).status_code == 200
+
+
+def test_analyste_ne_peut_pas_supprimer_une_facture(client, headers, client_id, se_connecter):
+    client.post(
+        "/users",
+        json={
+            "email": "bob@atelier-dupont.fr",
+            "nom": "Bob",
+            "mot_de_passe": "motdepasse123",
+            "role": "analyste",
+        },
+        headers=headers,
+    )
+    fid = client.post("/factures", json=facture(client_id), headers=headers).json()["id"]
+    headers_bob = se_connecter("bob@atelier-dupont.fr")
+
+    r = client.delete(f"/factures/{fid}", headers=headers_bob)
+
+    assert r.status_code == 403
+    assert client.get(f"/factures/{fid}", headers=headers).status_code == 200
+
+
+def test_supprimer_facture_d_une_autre_organisation(client, make_headers):
+    headers_a = make_headers("alice@atelier-dupont.fr", nom_organisation="Atelier Dupont")
+    headers_b = make_headers("bruno@autre-entreprise.fr", nom_organisation="Autre Entreprise")
+    cid = client.post("/clients", json=CLIENT, headers=headers_a).json()["id"]
+    fid = client.post("/factures", json=facture(cid), headers=headers_a).json()["id"]
+
+    r = client.delete(f"/factures/{fid}", headers=headers_b)
+
+    assert r.status_code == 404
+    assert client.get(f"/factures/{fid}", headers=headers_a).status_code == 200
+
+
+def test_supprimer_un_client_supprime_ses_factures(client, headers, client_id):
+    fid = client.post("/factures", json=facture(client_id), headers=headers).json()["id"]
+
+    assert client.delete(f"/clients/{client_id}", headers=headers).status_code == 204
+
+    assert client.get(f"/factures/{fid}", headers=headers).status_code == 404

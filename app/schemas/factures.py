@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from enum import Enum
+from app.schemas.clients import nettoyer_siren
 
 from pydantic import (
     BaseModel,
@@ -82,3 +83,35 @@ class FactureRead(FactureBase):
     @property
     def jours_de_retard(self) -> int:
         return retards.jours_de_retard(self.date_echeance, self.date_paiement)
+
+
+class FactureImport(FactureBase):
+    siren_client: str
+    date_paiement: date | None = None
+
+    @field_validator("siren_client")
+    @classmethod
+    def valider_siren_client(cls, v: str) -> str:
+        return nettoyer_siren(v)
+
+    @model_validator(mode="after")
+    def paiement_coherent(self):
+        if self.date_paiement is not None:
+            if self.date_paiement < self.date_emission:
+                raise ValueError(
+                    "La date de paiement ne peut pas précéder la date d'émission"
+                )
+            if self.date_paiement > date.today():
+                raise ValueError("La date de paiement ne peut pas être dans le futur")
+        return self
+
+
+class ErreurImport(BaseModel):
+    ligne: int
+    message: str
+
+
+class ImportRapport(BaseModel):
+    lignes_lues: int
+    factures_importees: int
+    erreurs: list[ErreurImport] = []

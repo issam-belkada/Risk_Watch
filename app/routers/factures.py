@@ -1,6 +1,6 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -11,10 +11,16 @@ from app.schemas.factures import (
     FactureCreate,
     FactureRead,
     FactureUpdate,
+    ImportRapport,
     PaiementCreate,
     StatutFacture,
 )
+from app.services.import_factures import ImportErreur, lire_csv
+
+
 router = APIRouter(prefix="/factures", tags=["Factures"])
+
+TAILLE_MAX_IMPORT = 2 * 1024 * 1024
 
 
 def get_facture_de_l_organisation(
@@ -192,3 +198,96 @@ def supprimer_facture(
         )
     db.delete(facture)
     db.commit()
+
+
+@router.post(
+    "/import",
+    response_model=ImportRapport,
+    status_code=201,
+    dependencies=[Depends(exiger_role("analyste", "admin"))],
+)
+def importer_factures(
+    fichier: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    contenu = fichier.file.read(TAILLE_MAX_IMPORT + 1)
+    if len(contenu) > TAILLE_MAX_IMPORT:
+        raise HTTPException(
+            status_code=413, detail="Fichier trop volumineux (2 Mo maximum)"
+        )
+
+    try:
+        valides, erreurs, nb_lignes = lire_csv(contenu)
+    except ImportErreur as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    clients = {
+        c.siren: c.id
+        for c in db.scalars(
+            select(Client).where(
+                Client.organisation_id == user.organisation_id,
+                Client.siren.is_not(None),
+            )
+        )
+    }
+    existantes = {
+        (client_id, numero)
+        for client_id, numero in db.execute(
+            select(Facture.client_id, Facture.numero)
+            .join(Client, Facture.client_id == Client.id)
+            .where(Client.organisation_id == user.organisation_id)
+        )
+    }
+
+    vues = set()
+    nouvelles = []
+    for numero_ligne, f in valides:
+        client_id = clients.get(f.siren_client)
+        if client_id is None:
+            erreurs.append(
+                {
+                    "ligne": numero_ligne,
+                    "message": f"siren_client : aucun client avec le SIREN {f.siren_client}",
+                }
+            )
+            continue
+
+        cle = (client_id, f.numero)
+        if cle in existantes or cle in vues:
+            erreurs.append(
+                {
+                    "ligne": numero_ligne,
+                    "message": f"numero : la facture {f.numero} existe déjà pour ce client "
+                    "(ou apparaît deux fois dans le fichier)",
+                }
+            )
+            continue
+
+        vues.add(cle)
+        nouvelles.append(
+            Facture(
+                client_id=client_id,
+                numero=f.numero,
+                montant_ttc=f.montant_ttc,
+                date_emission=f.date_emission,
+                date_echeance=f.date_echeance,
+                date_paiement=f.date_paiement,
+            )
+        )
+
+    if erreurs:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "lignes_lues": nb_lignes,
+                "factures_importees": 0,
+                "erreurs": sorted(erreurs, key=lambda e: e["ligne"]),
+            },
+        )
+
+    db.add_all(nouvelles)
+    db.commit()
+    return ImportRapport(
+        lignes_lues=nb_lignes, factures_importees=len(nouvelles), erreurs=[]
+    )
